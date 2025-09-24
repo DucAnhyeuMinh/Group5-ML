@@ -4,6 +4,8 @@ import pickle
 import numpy as np
 import plotly.graph_objects as go
 import time
+from datetime import datetime
+import pandas as pd
 
 # --- Streamlit Config (PHẢI ĐẶT ĐẦU TIÊN) ---
 st.set_page_config(
@@ -25,7 +27,7 @@ def get_base64_image(image_path):
         return None
 
 # Load background image
-bg_image = get_base64_image(r"c:\Users\this pc\Documents\ML\app\𝐀𝐞𝐬𝐭𝐡𝐞𝐭𝐢𝐜 𝐰𝐚𝐥𝐥𝐩𝐚𝐩𝐞𝐫.jpg")
+bg_image = get_base64_image(r"𝐀𝐞𝐬𝐭𝐡𝐞𝐭𝐢𝐜 𝐰𝐚𝐥𝐥𝐩𝐚𝐩𝐞𝐫.jpg")
 
 # --- Custom CSS để làm đẹp giao diện ---
 # Dynamic CSS based on background image
@@ -188,6 +190,10 @@ st.markdown(f"""
 </style>
 """, unsafe_allow_html=True)
 
+# --- Initialize session state for history ---
+if 'analysis_history' not in st.session_state:
+    st.session_state.analysis_history = []
+
 # --- Load trained Logistic Regression model và freqs ---
 @st.cache_resource
 def load_model_and_freqs():
@@ -273,6 +279,31 @@ with st.sidebar:
         st.success("✅ Model loaded successfully!")
     else:
         st.error("❌ Model files not found!")
+    
+    st.markdown("---")
+    
+    # History summary in sidebar
+    st.header("📝 History Summary")
+    if len(st.session_state.analysis_history) > 0:
+        positive_count = sum(1 for item in st.session_state.analysis_history if item['sentiment'] == 'Positive')
+        negative_count = len(st.session_state.analysis_history) - positive_count
+        
+        st.markdown(f"""
+        <div class="feature-card">
+            <strong>Total analyses:</strong> {len(st.session_state.analysis_history)}<br>
+            <strong>😊 Positive:</strong> {positive_count}<br>
+            <strong>😞 Negative:</strong> {negative_count}
+        </div>
+        """, unsafe_allow_html=True)
+        
+        # Quick actions
+        st.markdown("**Quick Actions:**")
+        if st.button("🗑️ Clear All History", key="sidebar_clear"):
+            st.session_state.analysis_history = []
+            st.success("History cleared!")
+            st.rerun()
+    else:
+        st.info("No analysis history yet!")
 
 # Main content
 if not model_loaded:
@@ -305,10 +336,6 @@ with col1:
             st.rerun()
             user_input = "This is terrible! I hate it and it doesn't work at all!"
     
-    with sample_col3:
-        if st.button("😐 Neutral Sample"):
-            st.rerun()
-            user_input = "This product is okay. It works fine but nothing special."
 
 with col2:
     st.subheader("🎯 Analysis Results")
@@ -330,6 +357,15 @@ with col2:
                 prob = model.predict_proba(input_vec).max()
                 
                 sentiment = "Positive" if y_pred == 1 else "Negative"
+                
+                # Lưu vào lịch sử
+                analysis_result = {
+                    'text': user_input,
+                    'sentiment': sentiment,
+                    'confidence': prob,
+                    'timestamp': datetime.now().strftime("%Y-%m-%d %H:%M:%S")
+                }
+                st.session_state.analysis_history.insert(0, analysis_result)  # Thêm vào đầu list
                 
                 # Hiển thị kết quả
                 if sentiment == "Positive":
@@ -384,6 +420,146 @@ if analyze_button and user_input.strip():
         # Confidence chart
         fig = create_confidence_chart(prob, sentiment)
         st.plotly_chart(fig, use_container_width=True)
+
+# History section
+st.markdown("---")
+st.header("📝 Analysis History")
+
+if len(st.session_state.analysis_history) > 0:
+    # Search functionality
+    search_term = st.text_input("🔍 Search in history:", placeholder="Enter keywords to search...", key="history_search")
+    
+    # Filter history based on search
+    if search_term:
+        filtered_history = [
+            analysis for analysis in st.session_state.analysis_history 
+            if search_term.lower() in analysis['text'].lower() or search_term.lower() in analysis['sentiment'].lower()
+        ]
+        if not filtered_history:
+            st.info(f"No results found for '{search_term}'")
+    else:
+        filtered_history = st.session_state.analysis_history
+    # History controls
+    col1, col2, col3 = st.columns([2, 1, 1])
+    
+    with col1:
+        display_count = len(filtered_history) if search_term else len(st.session_state.analysis_history)
+        st.markdown(f"**Showing {display_count} of {len(st.session_state.analysis_history)} analyses**")
+    
+    with col2:
+        if st.button("🗑️ Clear History", use_container_width=True):
+            st.session_state.analysis_history = []
+            st.success("History cleared!")
+            st.rerun()
+    
+    with col3:
+        # Export functionality
+        if st.session_state.analysis_history:
+            export_data = filtered_history if search_term else st.session_state.analysis_history
+            df = pd.DataFrame(export_data)
+            csv = df.to_csv(index=False)
+            st.download_button(
+                label="📥 Download CSV",
+                data=csv,
+                file_name=f"sentiment_analysis_history_{datetime.now().strftime('%Y%m%d_%H%M%S')}.csv",
+                mime="text/csv",
+                use_container_width=True
+            )
+    
+    st.markdown("---")
+    
+    # Display history with pagination
+    if filtered_history:
+        items_per_page = 5
+        total_pages = (len(filtered_history) - 1) // items_per_page + 1
+    
+        if total_pages > 1:
+            col1, col2, col3 = st.columns([1, 2, 1])
+            with col2:
+                page = st.selectbox("Select page:", range(1, total_pages + 1), key="history_page")
+            start_idx = (page - 1) * items_per_page
+            end_idx = start_idx + items_per_page
+            history_to_show = filtered_history[start_idx:end_idx]
+        else:
+            history_to_show = filtered_history
+        
+        # Display each history item
+        for i, analysis in enumerate(history_to_show):
+            # Find original index for numbering
+            original_idx = st.session_state.analysis_history.index(analysis) + 1
+            with st.expander(f"📄 Analysis #{original_idx} - {analysis['sentiment']} ({analysis['confidence']:.1%}) - {analysis['timestamp']}"):
+                
+                # Create columns for better layout
+                hist_col1, hist_col2 = st.columns([2, 1])
+                
+                with hist_col1:
+                    st.markdown("**Text:**")
+                    st.markdown(f"*\"{analysis['text']}\"*")
+                
+                with hist_col2:
+                    sentiment_class = "result-positive" if analysis['sentiment'] == "Positive" else "result-negative"
+                    st.markdown(f"""
+                    <div class="{sentiment_class}" style="margin: 0; padding: 0.5rem;">
+                        {analysis['sentiment']}<br>
+                        {analysis['confidence']:.1%}
+                    </div>
+                    """, unsafe_allow_html=True)
+                
+                # Additional details in a smaller font
+                st.markdown(f"""
+                <div style='font-size: 0.8em; color: #888; margin-top: 0.5rem;'>
+                    Analyzed on: {analysis['timestamp']}
+                </div>
+                """, unsafe_allow_html=True)
+    else:
+        st.info("No results found with current search criteria.")
+    
+    # Statistics
+    if len(st.session_state.analysis_history) > 1:
+        st.markdown("---")
+        st.subheader("📊 Statistics")
+        
+        # Calculate statistics
+        positive_count = sum(1 for item in st.session_state.analysis_history if item['sentiment'] == 'Positive')
+        negative_count = len(st.session_state.analysis_history) - positive_count
+        avg_confidence = sum(item['confidence'] for item in st.session_state.analysis_history) / len(st.session_state.analysis_history)
+        
+        stat_col1, stat_col2, stat_col3, stat_col4 = st.columns(4)
+        
+        with stat_col1:
+            st.markdown(f"""
+            <div class="feature-card" style="text-align: center;">
+                <strong>😊 Positive</strong><br>
+                {positive_count} ({positive_count/len(st.session_state.analysis_history):.1%})
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with stat_col2:
+            st.markdown(f"""
+            <div class="feature-card" style="text-align: center;">
+                <strong>😞 Negative</strong><br>
+                {negative_count} ({negative_count/len(st.session_state.analysis_history):.1%})
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with stat_col3:
+            st.markdown(f"""
+            <div class="feature-card" style="text-align: center;">
+                <strong>🎯 Avg Confidence</strong><br>
+                {avg_confidence:.1%}
+            </div>
+            """, unsafe_allow_html=True)
+        
+        with stat_col4:
+            st.markdown(f"""
+            <div class="feature-card" style="text-align: center;">
+                <strong>📝 Total Analyses</strong><br>
+                {len(st.session_state.analysis_history)}
+            </div>
+            """, unsafe_allow_html=True)
+
+else:
+    st.info("🔍 No analysis history yet. Analyze some text to see your history here!")
 
 # Footer
 st.markdown("---")
